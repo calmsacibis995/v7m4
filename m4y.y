@@ -1,3 +1,5 @@
+/* $Id$ */
+
 %{
 extern long	evalval;
 #define	YYSTYPE	long
@@ -92,6 +94,7 @@ peek(int c, int r1, int r2)
 	return(r1);
 }
 
+void
 yyerror(char *s)
 {
 }
