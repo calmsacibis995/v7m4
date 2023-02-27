@@ -108,7 +108,6 @@ char	*errploc;
 char	*tempname;
 struct nlist	*lookup();
 char	*install();
-char	*mktemp();
 char	*copy();
 long	ctol();
 int	hshval;
@@ -674,7 +673,7 @@ void
 domake(char **ap, int c)
 {
 	if (c > 0)
-		pbstr(mktemp(ap[1]));
+		pbstr(mkstemp(ap[1]));
 }
 
 void
