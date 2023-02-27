@@ -5,7 +5,9 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
+#include <string.h>
 
 #define ERROR NULL
 #define	READ	"r"
@@ -106,26 +108,26 @@ char	*errploc;
 char	*tempname;
 struct nlist	*lookup();
 char	*install();
-char	*malloc();
 char	*mktemp();
 char	*copy();
 long	ctol();
 int	hshval;
-FILE	*olist[11] = { stdout };
+FILE *olist[11];
 int	okret;
 int	curout	= 0;
-FILE	*curfile = { stdout };
-FILE	*infile[10] = { stdin };
+FILE *curfile;
+int *infile[10];
 int	infptr	= 0;
 
-main(argc, argv)
-char **argv;
+int
+main(int argc, char **argv)
 {
 	char *argstk[STACKS+10];
 	struct call callst[STACKS];
 	register char *tp, **ap;
-	int delexit(), catchsig();
-	register t;
+	int delexit();
+	void catchsig();
+	register int t;
 	int i;
 
 #ifdef gcos
@@ -200,7 +202,7 @@ char **argv;
 		signal(SIGHUP, catchsig);
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
 		signal(SIGINT, catchsig);
-	tempname = mktemp("/tmp/m4aXXXXX");
+	tempname = mkstemp("/tmp/m4aXXXXX");
 	close(creat(tempname, 0));
 #endif
 #ifdef gcos
@@ -328,16 +330,18 @@ char **argv;
 	delexit();
 }
 
+void
 catchsig()
 {
 	okret = 0;
 	delexit();
 }
 
+void
 delexit()
 {
 	register FILE *fp;
-	register i, c;
+	register int i, c;
 
 	if (!okret) {
 		signal(SIGHUP, SIG_IGN);
@@ -361,6 +365,7 @@ delexit()
 	exit(1-okret);
 }
 
+void
 puttok()
 {
 	register char *tp;
@@ -378,8 +383,8 @@ puttok()
 			putc(*tp++, curfile);
 }
 
-pbstr(str)
-register char *str;
+void
+pbstr(register char *str)
 {
 	register char *p;
 
@@ -394,11 +399,11 @@ register char *str;
 		putbak(*--p);
 }
 
-expand(a1, c)
-register char **a1;
+void
+expand(register char **a1, int c)
 {
 	register char *dp;
-	register n;
+	register int n;
 
 	dp = a1[-1];
 	if (dp==defloc)
@@ -462,8 +467,8 @@ register char **a1;
 	}
 }
 
-struct nlist *lookup(str)
-char *str;
+struct nlist *
+lookup(char *str)
 {
 	register char *s1, *s2;
 	register struct nlist *np;
@@ -483,8 +488,8 @@ char *str;
 	return(&nodef);
 }
 
-char *install(nam, val)
-char *nam, *val;
+char *
+install(char *nam, char *val)
 {
 	register struct nlist *np;
 
@@ -505,8 +510,8 @@ char *nam, *val;
 	return(np->def);
 }
 
-doundef(ap, c)
-char **ap;
+void
+doundef(char **ap, int c)
 {
 	register struct nlist *np, *tnp;
 
@@ -525,8 +530,8 @@ char **ap;
 	free((char *)np);
 }
 
-char *copy(s)
-register char *s;
+char *
+copy(register char *s)
 {
 	register char *p, *s1;
 
@@ -539,8 +544,8 @@ register char *s;
 	return(p);
 }
 
-dodef(ap, c)
-char **ap;
+void
+dodef(char **ap, int c)
 {
 	if (c >= 2) {
 		if (strcmp(ap[1], ap[2]) == 0) {
@@ -553,8 +558,8 @@ char **ap;
 		install(ap[1], "");
 }
 
-doifdef(ap, c)
-char **ap;
+void
+doifdef(char **ap, int c)
 {
 	register struct nlist *np;
 
@@ -566,14 +571,14 @@ char **ap;
 		pbstr(ap[3]);
 }
 
-dolen(ap, c)
-char **ap;
+void
+dolen(char **ap, int c)
 {
 	putnum((long) strlen(ap[1]));
 }
 
-docq(ap, c)
-char **ap;
+void
+docq(char **ap, int c)
 {
 	if (c > 1) {
 		lquote = *ap[1];
@@ -592,14 +597,14 @@ char **ap;
 	}
 }
 
-doshift(ap, c)
-char **ap;
+void
+doshift(char **ap, int c)
 {
 	fprintf(stderr, "m4: shift not yet implemented\n");
 }
 
-dodump(ap, c)
-char **ap;
+void
+dodump(char **ap, int c)
 {
 	int i;
 	register struct nlist *np;
@@ -615,8 +620,8 @@ char **ap;
 				fprintf(stderr, "`%s'	`%s'\n", np->name, np->def);
 }
 
-doerrp(ap, c)
-char **ap;
+void
+doerrp(char **ap, int c)
 {
 	if (c > 0) {
 		fprintf(stderr, ap[1], ap[2], ap[3], ap[4], ap[5], ap[6]);
@@ -628,8 +633,8 @@ char **ap;
 long	evalval;	/* return value from yacc stuff */
 char	*pe;	/* used by grammar */
 
-doeval(ap, c)
-char **ap;
+void
+doeval(char **ap, int c)
 {
 
 	if (c > 0) {
@@ -641,8 +646,8 @@ char **ap;
 	}
 }
 
-doincl(ap, c, noisy)
-char **ap;
+void
+doincl(char **ap, int c, int noisy)
 {
 	if (c > 0 && strlen(ap[1]) > 0) {
 		infptr++;
@@ -658,31 +663,31 @@ char **ap;
 	}
 }
 
-dosyscmd(ap, c)
-char **ap;
+void
+dosyscmd(char **ap, int c)
 {
 	if (c > 0)
 		system(ap[1]);
 }
 
-domake(ap, c)
-char **ap;
+void
+domake(char **ap, int c)
 {
 	if (c > 0)
 		pbstr(mktemp(ap[1]));
 }
 
-doincr(ap, c)
-char **ap;
+void
+doincr(char **ap, int c)
 {
 	if (c >= 1)
 		putnum(ctol(ap[1])+1);
 }
 
-putnum(num)
-long num;
+void
+putnum(long num)
 {
-	register sign;
+	register int sign;
 
 	sign = (num < 0) ? '-' : '\0';
 	if (num < 0)
@@ -695,8 +700,8 @@ long num;
 		putbak('-');
 }
 
-dosubstr(ap, c)
-char **ap;
+void
+dosubstr(char **ap, int c)
 {
 	int nc;
 	register char *sp, *fc;
@@ -713,17 +718,17 @@ char **ap;
 		putbak(*--sp);
 }
 
-doindex(ap, c)
-char **ap;
+void
+doindex(char **ap, int c)
 {
 	if (c >= 2)
 		putnum((long) strindex(ap[1], ap[2]));
 }
 
-strindex(p1, p2)
-char *p1, *p2;
+int
+strindex(char *p1, char *p2)
 {
-	register m;
+	register int m;
 	register char *s, *t, *p;
 
 	for (p=p1; *p; p++) {
@@ -738,8 +743,8 @@ char *p1, *p2;
 	return(-1);
 }
 
-dotransl(ap, c)
-char **ap;
+void
+dotransl(char **ap, int c)
 {
 	register char *s, *fr, *to;
 
@@ -771,8 +776,8 @@ char **ap;
 	pbstr(ap[1]);
 }
 
-doif(ap, c)
-register char **ap;
+void
+doif(register char **ap, int c)
 {
 	if (c < 3)
 		return;
@@ -788,8 +793,8 @@ register char **ap;
 		pbstr(ap[1]);
 }
 
-dodiv(ap, c)
-register char **ap;
+void
+dodiv(register char **ap, int c)
 {
 	register int f;
 
@@ -808,8 +813,8 @@ register char **ap;
 	}
 }
 
-doundiv(ap, c)
-char **ap;
+void
+doundiv(char **ap, int c)
 {
 	register FILE *fp;
 	register int i, ch;
@@ -849,26 +854,26 @@ char **ap;
 	}
 }
 
-dodivnum(ap, c)
-char **ap;
+void
+dodivnum(char **ap, int c)
 {
 	putnum((long) curout);
 }
 
-dodnl(ap, c)
-char **ap;
+void
+dodnl(char **ap, int c)
 {
-	register t;
+	register int t;
 
 	while ((t=getchr())!='\n' && t>=0)
 		;
 }
 
-long ctol(str)
-register char *str;
+long
+ctol(register char *str)
 {
-	register sign;
-	long num;
+	register int sign;
+	long int num;
 
 	while (*str==' ' || *str=='\t' || *str=='\n')
 		str++;
@@ -884,20 +889,22 @@ register char *str;
 	return(sign * num);
 }
 
-ctoi(s)
-char *s;
+int
+ctoi(char *s)
 {
 	return(ctol(s));
 }
 
-min(a, b)
+void
+min(int a, int b)
 {
 	if (a>b)
 		return(b);
 	return(a);
 }
 
-max(a, b)
+void
+max(int a, int b)
 {
 	if (a>b)
 		return(a);

@@ -41,7 +41,9 @@ e	: e '|' e	={ $$ = ($1!=0 || $3!=0) ? 1 : 0; }
 
 %%
 
-yylex() {
+int
+yylex()
+{
 	extern char *pe;
 
 	while (*pe==' ' || *pe=='\t' || *pe=='\n')
@@ -80,15 +82,16 @@ yylex() {
 	}
 }
 
-peek(c, r1, r2)
+int
+peek(int c, int r1, int r2)
 {
+	extern char *pe;
 	if (*++pe != c)
 		return(r2);
 	++pe;
 	return(r1);
 }
 
-yyerror(s)
-char *s;
+yyerror(char *s)
 {
 }

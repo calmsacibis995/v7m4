@@ -6,6 +6,7 @@
 # $Id$
 
 CFLAGS = -n -O -s
+YACC = byacc
 
 m4:	m4.o m4y.o
 	cc -n -s -o m4 m4.o m4y.o
@@ -18,4 +19,6 @@ cmp:	m4
 
 cp:	m4
 	cp m4 /bin/m4
-	rm m4 *.o
+
+clean:
+	rm -rf m4 *.o
