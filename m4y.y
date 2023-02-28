@@ -44,6 +44,16 @@ e	: e '|' e	={ $$ = ($1!=0 || $3!=0) ? 1 : 0; }
 %%
 
 int
+peek(int c, int r1, int r2)
+{
+	extern char *pe;
+	if (*++pe != c)
+		return(r2);
+	++pe;
+	return(r1);
+}
+
+int
 yylex()
 {
 	extern char *pe;
@@ -82,16 +92,6 @@ yylex()
 			evalval = evalval*10 + *pe++ - '0';
 		return(DIGITS);
 	}
-}
-
-int
-peek(int c, int r1, int r2)
-{
-	extern char *pe;
-	if (*++pe != c)
-		return(r2);
-	++pe;
-	return(r1);
 }
 
 void

@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #define ERROR NULL
 #define	READ	"r"
@@ -105,7 +107,7 @@ char	*syscmdloc;
 char	*dumploc;
 char	*errploc;
 
-char	*tempname;
+int *tempname;
 struct nlist	*lookup();
 char	*install();
 char	*copy();
@@ -115,8 +117,512 @@ FILE *olist[11];
 int	okret;
 int	curout	= 0;
 FILE *curfile;
-int *infile[10];
+FILE *infile[10];
 int	infptr	= 0;
+
+void
+delexit()
+{
+	register FILE *fp;
+	register int i, c;
+
+	if (!okret) {
+		signal(SIGHUP, SIG_IGN);
+		signal(SIGINT, SIG_IGN);
+	}
+	for (i=1; i<10; i++) {
+		if (olist[i]==NULL)
+			continue;
+		fclose(olist[i]);
+		tempname[7] = 'a'+i;
+		if (okret) {
+			fp = fopen(tempname, READ);
+			while ((c = getc(fp)) > 0)
+				putchar(c);
+			fclose(fp);
+		}
+		unlink(tempname);
+	}
+	tempname[7] = 'a';
+	unlink(tempname);
+	exit(1-okret);
+}
+
+void
+catchsig()
+{
+	okret = 0;
+	delexit();
+}
+
+void
+puttok()
+{
+	register char *tp;
+
+	tp = token;
+	if (cp) {
+		if (op >= &obuf[SAVS]) {
+			fprintf(stderr, "m4: argument overflow\n");
+			delexit();
+		}
+		while (*tp)
+			*op++ = *tp++;
+	} else if (curfile)
+		while (*tp)
+			putc(*tp++, curfile);
+}
+
+void
+dodef(char **ap, int c)
+{
+	if (c >= 2) {
+		if (strcmp(ap[1], ap[2]) == 0) {
+			fprintf(stderr, "m4: %s defined as itself\n", ap[1]);
+			delexit();
+		}
+		install(ap[1], ap[2]);
+	}
+	else if (c == 1)
+		install(ap[1], "");
+}
+
+void
+pbstr(register char *str)
+{
+	register char *p;
+
+	p = str;
+	while (*p++);
+	--p;
+	if (ip >= &ibuf[SAVS]) {
+		fprintf(stderr, "m4: pushback overflow\n");
+		delexit();
+	}
+	while (p > str)
+		putbak(*--p);
+}
+
+void
+doifdef(char **ap, int c)
+{
+	register struct nlist *np;
+
+	if (c < 2)
+		return;
+	if (lookup(ap[1])->name != NULL)
+		pbstr(ap[2]);
+	else if (c >= 3)
+		pbstr(ap[3]);
+}
+
+void
+putnum(long num)
+{
+	register int sign;
+
+	sign = (num < 0) ? '-' : '\0';
+	if (num < 0)
+		num = -num;
+	do {
+		putbak(num%10+'0');
+		num = num/10;
+	} while (num!=0);
+	if (sign == '-')
+		putbak('-');
+}
+
+void
+dolen(char **ap, int c)
+{
+	putnum((long) strlen(ap[1]));
+}
+
+void
+docq(char **ap, int c)
+{
+	if (c > 1) {
+		lquote = *ap[1];
+		rquote = *ap[2];
+	} else if (c == 1) {
+		lquote = rquote = *ap[1];
+	} else {
+#ifndef M4
+		lquote = GRAVE;
+		rquote = ACUTE;
+#endif
+#ifdef M4
+		lquote = LBRAK;
+		rquote = RBRAK;
+#endif
+	}
+}
+
+void
+doshift(char **ap, int c)
+{
+	fprintf(stderr, "m4: shift not yet implemented\n");
+}
+
+void
+dodump(char **ap, int c)
+{
+	int i;
+	register struct nlist *np;
+
+	if (c > 0)
+		while (c--) {
+			if ((np = lookup(*++ap))->name != NULL)
+				fprintf(stderr, "`%s'	`%s'\n", np->name, np->def);
+		}
+	else
+		for (i=0; i<HSHSIZ; i++)
+			for (np=hshtab[i]; np!=NULL; np=np->next)
+				fprintf(stderr, "`%s'	`%s'\n", np->name, np->def);
+}
+
+void
+doerrp(char **ap, int c)
+{
+	if (c > 0) {
+		fprintf(stderr, ap[1], ap[2], ap[3], ap[4], ap[5], ap[6]);
+		fprintf(stderr, "\n");
+	}
+}
+
+
+long	evalval;	/* return value from yacc stuff */
+char	*pe;	/* used by grammar */
+
+void
+doeval(char **ap, int c)
+{
+
+	if (c > 0) {
+		pe = ap[1];
+		if (yyparse() == 0)
+			putnum(evalval);
+		else
+			fprintf(stderr, "m4: invalid expression in eval: %s\n", ap[1]);
+	}
+}
+
+void
+doincl(char **ap, int c, int noisy)
+{
+	if (c > 0 && strlen(ap[1]) > 0) {
+		infptr++;
+		ip_stk[infptr] = cur_ip = ip;
+		if ((infile[infptr] = fopen(ap[1], READ))==ERROR) {
+			if (noisy) {
+				fprintf(stderr, "m4: file not found: %s\n", ap[1]);
+				delexit();
+			}
+			else
+				infptr--;
+		}
+	}
+}
+
+void
+dosyscmd(char **ap, int c)
+{
+	if (c > 0)
+		system(ap[1]);
+}
+
+void
+domake(char **ap, int c)
+{
+	if (c > 0)
+		pbstr(mkstemp(ap[1]));
+}
+
+void
+doincr(char **ap, int c)
+{
+	if (c >= 1)
+		putnum(ctol(ap[1])+1);
+}
+
+void
+doundef(char **ap, int c)
+{
+	register struct nlist *np, *tnp;
+
+	if (c < 1 || (np = lookup(ap[1]))->name == NULL)
+		return;
+	tnp = hshtab[hshval];	/* lookup sets hshval */
+	if (tnp == np)	/* it's in first place */
+		hshtab[hshval] = np->next;
+	else {
+		for ( ; tnp->next != np; tnp = tnp->next)
+			;
+		tnp->next = np->next;
+	}
+	free(np->name);
+	free(np->def);
+	free((char *)np);
+}
+
+void
+dodivnum(char **ap, int c)
+{
+	putnum((long) curout);
+}
+
+void
+dodnl(char **ap, int c)
+{
+	register int t;
+
+	while ((t=getchr())!='\n' && t>=0)
+		;
+}
+
+int
+ctoi(char *s)
+{
+	return(ctol(s));
+}
+
+int
+min(int a, int b)
+{
+	if (a>b)
+		return(b);
+	return(a);
+}
+
+int
+max(int a, int b)
+{
+	if (a>b)
+		return(a);
+	return(b);
+}
+
+void
+dosubstr(char **ap, int c)
+{
+	int nc;
+	register char *sp, *fc;
+
+	if (c<2)
+		return;
+	if (c<3)
+		nc = TOKS;
+	else
+		nc = ctoi(ap[3]);
+	fc = ap[1] + max(0, min(ctoi(ap[2]), strlen(ap[1])));
+	sp = fc + min(nc, strlen(fc));
+	while (sp > fc)
+		putbak(*--sp);
+}
+
+int
+strindex(char *p1, char *p2)
+{
+	register int m;
+	register char *s, *t, *p;
+
+	for (p=p1; *p; p++) {
+		s = p;
+		m = 1;
+		for (t=p2; *t; )
+			if (*t++ != *s++)
+				m = 0;
+		if (m == 1)
+			return(p-p1);
+	}
+	return(-1);
+}
+
+void
+doindex(char **ap, int c)
+{
+	if (c >= 2)
+		putnum((long) strindex(ap[1], ap[2]));
+}
+
+void
+dotransl(char **ap, int c)
+{
+	register char *s, *fr, *to;
+
+	if (c <= 1) return;
+
+	if (c == 2) {
+		register int i;
+		to = ap[1];
+		for (s = ap[1]; *s; s++) {
+			i = 0;
+			for (fr = ap[2]; *fr; fr++)
+				if (*s == *fr) {
+					i++;
+					break;
+				}
+			if (i == 0)
+				*to++ = *s;
+		}
+		*to = '\0';
+	}
+
+	if (c >= 3) {
+		for (s = ap[1]; *s; s++)
+			for (fr = ap[2], to = ap[3]; *fr && *to; fr++, to++)
+				if (*s == *fr)
+					*s = *to;
+	}
+
+	pbstr(ap[1]);
+}
+
+void
+doif(register char **ap, int c)
+{
+	if (c < 3)
+		return;
+	while (c >= 3) {
+		if (strcmp(ap[1], ap[2]) == 0) {
+			pbstr(ap[3]);
+			return;
+		}
+		c -= 3;
+		ap += 3;
+	}
+	if (c > 0)
+		pbstr(ap[1]);
+}
+
+void
+dodiv(register char **ap, int c)
+{
+	register int f;
+
+	if (c<1)
+		f = 0;
+	else
+		f = ctoi(ap[1]);
+	if (f>=10 || f<0) {
+		curfile = NULL;
+		return;
+	}
+	tempname[7] = 'a' + f;
+	if (olist[f] || (olist[f]=fopen(tempname, WRITE))) {
+		curout = f;
+		curfile = olist[f];
+	}
+}
+
+void
+doundiv(char **ap, int c)
+{
+	register FILE *fp;
+	register int i, ch;
+	int j;
+
+	if (c == 0) {
+		for (i=1; i<10; i++) {
+			if (i==curout || olist[i]==NULL)
+				continue;
+			fclose(olist[i]);
+			tempname[7] = 'a'+i;
+			fp = fopen(tempname, READ);
+			if (curfile != NULL)
+				while ((ch = getc(fp)) > 0)
+					putc(ch, curfile);
+			fclose(fp);
+			unlink(tempname);
+			olist[i] = NULL;
+		}
+
+	}
+	else {
+		for (j = 1; j <= c; j++) {
+			i = ctoi(*++ap);
+			if (i<1 || i>9 || i==curout || olist[i]==NULL)
+				continue;
+			fclose(olist[i]);
+			tempname[7] = 'a'+i;
+			fp = fopen(tempname, READ);
+			if (curfile != NULL)
+				while ((ch = getc(fp)) > 0)
+					putc(ch, curfile);
+			fclose(fp);
+			unlink(tempname);
+			olist[i] = NULL;
+		}
+	}
+}
+
+void
+expand(register char **a1, int c)
+{
+	register char *dp;
+	register int n;
+
+	dp = a1[-1];
+	if (dp==defloc)
+		dodef(a1, c);
+	else if (dp==evaloc)
+		doeval(a1, c);
+	else if (dp==inclloc)
+		doincl(a1, c, 1);
+	else if (dp==sinclloc)
+		doincl(a1, c, 0);
+	else if (dp==makeloc)
+		domake(a1, c);
+	else if (dp==syscmdloc)
+		dosyscmd(a1, c);
+	else if (dp==incrloc)
+		doincr(a1, c);
+	else if (dp==substrloc)
+		dosubstr(a1, c);
+	else if (dp==indexloc)
+		doindex(a1, c);
+	else if (dp==transloc)
+		dotransl(a1, c);
+	else if (dp==ifloc)
+		doif(a1, c);
+	else if (dp==divloc)
+		dodiv(a1, c);
+	else if (dp==divnumloc)
+		dodivnum(a1, c);
+	else if (dp==undivloc)
+		doundiv(a1, c);
+	else if (dp==dnlloc)
+		dodnl(a1, c);
+	else if (dp==dumploc)
+		dodump(a1, c);
+	else if (dp==errploc)
+		doerrp(a1, c);
+	else if (dp==lenloc)
+		dolen(a1, c);
+	else if (dp==ifdefloc)
+		doifdef(a1, c);
+	else if (dp==undefloc)
+		doundef(a1, c);
+	else if (dp==shiftloc)
+		doshift(a1, c);
+	else if (dp==cqloc)
+		docq(a1, c);
+	else {
+		while (*dp++);
+		for (dp--; dp>a1[-1]; ) {
+			if (--dp>a1[-1] && dp[-1]=='$') {
+				n = *dp-'0';
+				if (n>=0 && n<=9) {
+					if (n <= c)
+						pbstr(a1[n]);
+					dp--;
+				} else
+					putbak(*dp);
+			} else
+				putbak(*dp);
+		}
+	}
+}
 
 int
 main(int argc, char **argv)
@@ -124,8 +630,6 @@ main(int argc, char **argv)
 	char *argstk[STACKS+10];
 	struct call callst[STACKS];
 	register char *tp, **ap;
-	int delexit();
-	void catchsig();
 	register int t;
 	int i;
 
@@ -329,143 +833,6 @@ main(int argc, char **argv)
 	delexit();
 }
 
-void
-catchsig()
-{
-	okret = 0;
-	delexit();
-}
-
-void
-delexit()
-{
-	register FILE *fp;
-	register int i, c;
-
-	if (!okret) {
-		signal(SIGHUP, SIG_IGN);
-		signal(SIGINT, SIG_IGN);
-	}
-	for (i=1; i<10; i++) {
-		if (olist[i]==NULL)
-			continue;
-		fclose(olist[i]);
-		tempname[7] = 'a'+i;
-		if (okret) {
-			fp = fopen(tempname, READ);
-			while ((c = getc(fp)) > 0)
-				putchar(c);
-			fclose(fp);
-		}
-		unlink(tempname);
-	}
-	tempname[7] = 'a';
-	unlink(tempname);
-	exit(1-okret);
-}
-
-void
-puttok()
-{
-	register char *tp;
-
-	tp = token;
-	if (cp) {
-		if (op >= &obuf[SAVS]) {
-			fprintf(stderr, "m4: argument overflow\n");
-			delexit();
-		}
-		while (*tp)
-			*op++ = *tp++;
-	} else if (curfile)
-		while (*tp)
-			putc(*tp++, curfile);
-}
-
-void
-pbstr(register char *str)
-{
-	register char *p;
-
-	p = str;
-	while (*p++);
-	--p;
-	if (ip >= &ibuf[SAVS]) {
-		fprintf(stderr, "m4: pushback overflow\n");
-		delexit();
-	}
-	while (p > str)
-		putbak(*--p);
-}
-
-void
-expand(register char **a1, int c)
-{
-	register char *dp;
-	register int n;
-
-	dp = a1[-1];
-	if (dp==defloc)
-		dodef(a1, c);
-	else if (dp==evaloc)
-		doeval(a1, c);
-	else if (dp==inclloc)
-		doincl(a1, c, 1);
-	else if (dp==sinclloc)
-		doincl(a1, c, 0);
-	else if (dp==makeloc)
-		domake(a1, c);
-	else if (dp==syscmdloc)
-		dosyscmd(a1, c);
-	else if (dp==incrloc)
-		doincr(a1, c);
-	else if (dp==substrloc)
-		dosubstr(a1, c);
-	else if (dp==indexloc)
-		doindex(a1, c);
-	else if (dp==transloc)
-		dotransl(a1, c);
-	else if (dp==ifloc)
-		doif(a1, c);
-	else if (dp==divloc)
-		dodiv(a1, c);
-	else if (dp==divnumloc)
-		dodivnum(a1, c);
-	else if (dp==undivloc)
-		doundiv(a1, c);
-	else if (dp==dnlloc)
-		dodnl(a1, c);
-	else if (dp==dumploc)
-		dodump(a1, c);
-	else if (dp==errploc)
-		doerrp(a1, c);
-	else if (dp==lenloc)
-		dolen(a1, c);
-	else if (dp==ifdefloc)
-		doifdef(a1, c);
-	else if (dp==undefloc)
-		doundef(a1, c);
-	else if (dp==shiftloc)
-		doshift(a1, c);
-	else if (dp==cqloc)
-		docq(a1, c);
-	else {
-		while (*dp++);
-		for (dp--; dp>a1[-1]; ) {
-			if (--dp>a1[-1] && dp[-1]=='$') {
-				n = *dp-'0';
-				if (n>=0 && n<=9) {
-					if (n <= c)
-						pbstr(a1[n]);
-					dp--;
-				} else
-					putbak(*dp);
-			} else
-				putbak(*dp);
-		}
-	}
-}
-
 struct nlist *
 lookup(char *str)
 {
@@ -509,26 +876,6 @@ install(char *nam, char *val)
 	return(np->def);
 }
 
-void
-doundef(char **ap, int c)
-{
-	register struct nlist *np, *tnp;
-
-	if (c < 1 || (np = lookup(ap[1]))->name == NULL)
-		return;
-	tnp = hshtab[hshval];	/* lookup sets hshval */
-	if (tnp == np)	/* it's in first place */
-		hshtab[hshval] = np->next;
-	else {
-		for ( ; tnp->next != np; tnp = tnp->next)
-			;
-		tnp->next = np->next;
-	}
-	free(np->name);
-	free(np->def);
-	free((char *)np);
-}
-
 char *
 copy(register char *s)
 {
@@ -541,331 +888,6 @@ copy(register char *s)
 	}
 	while (*s1++ = *s++);
 	return(p);
-}
-
-void
-dodef(char **ap, int c)
-{
-	if (c >= 2) {
-		if (strcmp(ap[1], ap[2]) == 0) {
-			fprintf(stderr, "m4: %s defined as itself\n", ap[1]);
-			delexit();
-		}
-		install(ap[1], ap[2]);
-	}
-	else if (c == 1)
-		install(ap[1], "");
-}
-
-void
-doifdef(char **ap, int c)
-{
-	register struct nlist *np;
-
-	if (c < 2)
-		return;
-	if (lookup(ap[1])->name != NULL)
-		pbstr(ap[2]);
-	else if (c >= 3)
-		pbstr(ap[3]);
-}
-
-void
-dolen(char **ap, int c)
-{
-	putnum((long) strlen(ap[1]));
-}
-
-void
-docq(char **ap, int c)
-{
-	if (c > 1) {
-		lquote = *ap[1];
-		rquote = *ap[2];
-	} else if (c == 1) {
-		lquote = rquote = *ap[1];
-	} else {
-#ifndef M4
-		lquote = GRAVE;
-		rquote = ACUTE;
-#endif
-#ifdef M4
-		lquote = LBRAK;
-		rquote = RBRAK;
-#endif
-	}
-}
-
-void
-doshift(char **ap, int c)
-{
-	fprintf(stderr, "m4: shift not yet implemented\n");
-}
-
-void
-dodump(char **ap, int c)
-{
-	int i;
-	register struct nlist *np;
-
-	if (c > 0)
-		while (c--) {
-			if ((np = lookup(*++ap))->name != NULL)
-				fprintf(stderr, "`%s'	`%s'\n", np->name, np->def);
-		}
-	else
-		for (i=0; i<HSHSIZ; i++)
-			for (np=hshtab[i]; np!=NULL; np=np->next)
-				fprintf(stderr, "`%s'	`%s'\n", np->name, np->def);
-}
-
-void
-doerrp(char **ap, int c)
-{
-	if (c > 0) {
-		fprintf(stderr, ap[1], ap[2], ap[3], ap[4], ap[5], ap[6]);
-		fprintf(stderr, "\n");
-	}
-}
-
-
-long	evalval;	/* return value from yacc stuff */
-char	*pe;	/* used by grammar */
-
-void
-doeval(char **ap, int c)
-{
-
-	if (c > 0) {
-		pe = ap[1];
-		if (yyparse() == 0)
-			putnum(evalval);
-		else
-			fprintf(stderr, "m4: invalid expression in eval: %s\n", ap[1]);
-	}
-}
-
-void
-doincl(char **ap, int c, int noisy)
-{
-	if (c > 0 && strlen(ap[1]) > 0) {
-		infptr++;
-		ip_stk[infptr] = cur_ip = ip;
-		if ((infile[infptr] = fopen(ap[1], READ))==ERROR) {
-			if (noisy) {
-				fprintf(stderr, "m4: file not found: %s\n", ap[1]);
-				delexit();
-			}
-			else
-				infptr--;
-		}
-	}
-}
-
-void
-dosyscmd(char **ap, int c)
-{
-	if (c > 0)
-		system(ap[1]);
-}
-
-void
-domake(char **ap, int c)
-{
-	if (c > 0)
-		pbstr(mkstemp(ap[1]));
-}
-
-void
-doincr(char **ap, int c)
-{
-	if (c >= 1)
-		putnum(ctol(ap[1])+1);
-}
-
-void
-putnum(long num)
-{
-	register int sign;
-
-	sign = (num < 0) ? '-' : '\0';
-	if (num < 0)
-		num = -num;
-	do {
-		putbak(num%10+'0');
-		num = num/10;
-	} while (num!=0);
-	if (sign == '-')
-		putbak('-');
-}
-
-void
-dosubstr(char **ap, int c)
-{
-	int nc;
-	register char *sp, *fc;
-
-	if (c<2)
-		return;
-	if (c<3)
-		nc = TOKS;
-	else
-		nc = ctoi(ap[3]);
-	fc = ap[1] + max(0, min(ctoi(ap[2]), strlen(ap[1])));
-	sp = fc + min(nc, strlen(fc));
-	while (sp > fc)
-		putbak(*--sp);
-}
-
-void
-doindex(char **ap, int c)
-{
-	if (c >= 2)
-		putnum((long) strindex(ap[1], ap[2]));
-}
-
-int
-strindex(char *p1, char *p2)
-{
-	register int m;
-	register char *s, *t, *p;
-
-	for (p=p1; *p; p++) {
-		s = p;
-		m = 1;
-		for (t=p2; *t; )
-			if (*t++ != *s++)
-				m = 0;
-		if (m == 1)
-			return(p-p1);
-	}
-	return(-1);
-}
-
-void
-dotransl(char **ap, int c)
-{
-	register char *s, *fr, *to;
-
-	if (c <= 1) return;
-
-	if (c == 2) {
-		register int i;
-		to = ap[1];
-		for (s = ap[1]; *s; s++) {
-			i = 0;
-			for (fr = ap[2]; *fr; fr++)
-				if (*s == *fr) {
-					i++;
-					break;
-				}
-			if (i == 0)
-				*to++ = *s;
-		}
-		*to = '\0';
-	}
-
-	if (c >= 3) {
-		for (s = ap[1]; *s; s++)
-			for (fr = ap[2], to = ap[3]; *fr && *to; fr++, to++)
-				if (*s == *fr)
-					*s = *to;
-	}
-
-	pbstr(ap[1]);
-}
-
-void
-doif(register char **ap, int c)
-{
-	if (c < 3)
-		return;
-	while (c >= 3) {
-		if (strcmp(ap[1], ap[2]) == 0) {
-			pbstr(ap[3]);
-			return;
-		}
-		c -= 3;
-		ap += 3;
-	}
-	if (c > 0)
-		pbstr(ap[1]);
-}
-
-void
-dodiv(register char **ap, int c)
-{
-	register int f;
-
-	if (c<1)
-		f = 0;
-	else
-		f = ctoi(ap[1]);
-	if (f>=10 || f<0) {
-		curfile = NULL;
-		return;
-	}
-	tempname[7] = 'a' + f;
-	if (olist[f] || (olist[f]=fopen(tempname, WRITE))) {
-		curout = f;
-		curfile = olist[f];
-	}
-}
-
-void
-doundiv(char **ap, int c)
-{
-	register FILE *fp;
-	register int i, ch;
-	int j;
-
-	if (c == 0) {
-		for (i=1; i<10; i++) {
-			if (i==curout || olist[i]==NULL)
-				continue;
-			fclose(olist[i]);
-			tempname[7] = 'a'+i;
-			fp = fopen(tempname, READ);
-			if (curfile != NULL)
-				while ((ch = getc(fp)) > 0)
-					putc(ch, curfile);
-			fclose(fp);
-			unlink(tempname);
-			olist[i] = NULL;
-		}
-
-	}
-	else {
-		for (j = 1; j <= c; j++) {
-			i = ctoi(*++ap);
-			if (i<1 || i>9 || i==curout || olist[i]==NULL)
-				continue;
-			fclose(olist[i]);
-			tempname[7] = 'a'+i;
-			fp = fopen(tempname, READ);
-			if (curfile != NULL)
-				while ((ch = getc(fp)) > 0)
-					putc(ch, curfile);
-			fclose(fp);
-			unlink(tempname);
-			olist[i] = NULL;
-		}
-	}
-}
-
-void
-dodivnum(char **ap, int c)
-{
-	putnum((long) curout);
-}
-
-void
-dodnl(char **ap, int c)
-{
-	register int t;
-
-	while ((t=getchr())!='\n' && t>=0)
-		;
 }
 
 long
@@ -886,26 +908,4 @@ ctol(register char *str)
 	while (*str>='0' && *str<='9')
 		num = num*10 + *str++ - '0';
 	return(sign * num);
-}
-
-int
-ctoi(char *s)
-{
-	return(ctol(s));
-}
-
-void
-min(int a, int b)
-{
-	if (a>b)
-		return(b);
-	return(a);
-}
-
-void
-max(int a, int b)
-{
-	if (a>b)
-		return(a);
-	return(b);
 }
