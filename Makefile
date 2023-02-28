@@ -5,7 +5,7 @@
 #
 # $Id$
 
-CFLAGS = -n -O -s
+CFLAGS = -O -s
 YACC = byacc
 
 m4:	m4.o m4y.o
