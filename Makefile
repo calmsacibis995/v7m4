@@ -9,7 +9,7 @@ CFLAGS = -O -s -g
 YACC = byacc
 
 m4:	m4.o m4y.o
-	$(CC) -s -o m4 m4.o m4y.o
+	$(CC) -o m4 m4.o m4y.o
 
 all:	m4
 
