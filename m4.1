@@ -1,14 +1,14 @@
 .\ Manual page for v7m4
 .\ Contact www.fe32gr23@gmail.com for corrections to mistakes or typos.
 .\ $Id$
-.TH M4 1 
+.TH V7M4 1 
 .SH NAME
-m4 \- macro processor
+v7m4 \- the m4 macro processor found in v7 for modern systems
 .SH SYNOPSIS
-.B m4
+.B v7m4
 [ files ]
 .SH DESCRIPTION
-.I M4
+.I V7M4
 is a macro processor
 intended as a front end for Ratfor, C, and other languages.
 Each of the argument files is processed in order;
@@ -43,7 +43,7 @@ After argument collection,
 the value of the macro is pushed back onto the input stream
 and rescanned.
 .PP
-.I M4
+.I V7M4
 makes available the following built-in macros.
 They may be redefined, but once this is done the original meaning is lost.
 Their values are null unless otherwise stated.
@@ -70,7 +70,7 @@ If there is no third argument, the value is null.
 The word
 .I unix
 is predefined on UNIX versions of
-.IR m4 .
+.IR m4/v7m4 .
 .TP
 changequote
 Change quote characters to the first and second arguments.
