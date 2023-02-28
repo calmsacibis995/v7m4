@@ -3,14 +3,14 @@ The macro processor found in UNIX V7, but updated.
 Imported from my CVS repository.
 
 # Currently works on:
-  * Linux
-  * macOS (under development)
+  *Linux
+  *macOS (under development)
 
 # How to build
 You will need:
-    * `gcc` or `clang`
-    * `make`
-    * `byacc`
+    *`gcc` or `clang`
+    *`make`
+    *`byacc`
 
 Install them through your package manager.
 
