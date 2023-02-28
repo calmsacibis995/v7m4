@@ -119,6 +119,7 @@ int	curout	= 0;
 FILE *curfile;
 FILE *infile[10];
 int	infptr	= 0;
+int	yyparse();
 
 void
 delexit()
@@ -705,7 +706,7 @@ main(int argc, char **argv)
 		signal(SIGHUP, catchsig);
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
 		signal(SIGINT, catchsig);
-	tempname = mkstemp("/tmp/m4aXXXXX");
+	tempname = mkstemp("m4aXXXXX");
 	close(creat(tempname, 0));
 #endif
 #ifdef gcos
